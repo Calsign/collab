@@ -50,7 +50,8 @@ pub fn parse_cli() -> Result<Cli> {
     let root = matches
         .value_of("root")
         .map(PathBuf::from)
-        .unwrap_or(env::current_dir()?);
+        .unwrap_or(env::current_dir()?)
+        .canonicalize()?;
 
     if root.exists() {
         if !fs::metadata(&root)?.is_dir() {

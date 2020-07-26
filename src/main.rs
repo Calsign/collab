@@ -180,7 +180,8 @@ fn main() -> Result<()> {
 }
 
 // current problems:
-//  - make a client cli with shm for interfacing with running daemon
 //  - ignore certain paths
-//  - don't load entire file into memory?
+//  - sync file permissions (e.g. execute bit) (there may be trouble supporting Windows...)
+//  - don't load entire file into memory, send it by streaming instead?
+//  - encryption with libsignal-protocol?
 //  - maybe other things? I forget
