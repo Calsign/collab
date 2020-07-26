@@ -65,13 +65,13 @@ pub struct IpcClientInfo {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum FsReg {
-    File(Vec<u8>), // TODO make this an Rc?
+    File(Arc<Vec<u8>>),
     Dir,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum FsDiff {
-    Write(PathBuf, Vec<u8>), // TODO make this an Rc?
+    Write(PathBuf, Arc<Vec<u8>>),
     NewDir(PathBuf),
     Del(PathBuf),
     Move(PathBuf, PathBuf),

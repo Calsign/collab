@@ -3,6 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::mpsc,
+    sync::Arc,
     time,
 };
 
@@ -10,7 +11,7 @@ impl FsDiff {
     pub fn apply(&self, root: &Path) -> Result<()> {
         use FsDiff::*;
         match self {
-            Write(path, data) => fs::write(path_join(root, path), data)?,
+            Write(path, data) => fs::write(path_join(root, path), &data[..])?,
             NewDir(path) => fs::create_dir(path_join(root, path))?,
             Del(path) => {
                 let full_path = path_join(root, path);
@@ -88,7 +89,7 @@ pub fn load_fs(path: &Path) -> Result<Vec<FsDiff>> {
             }
         } else {
             let data = fs::read(&path).unwrap_or(Vec::new());
-            list.push(FsDiff::Write(stripped_path, data));
+            list.push(FsDiff::Write(stripped_path, Arc::new(data)));
         }
         return Ok(());
     }
@@ -126,7 +127,7 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
             }
             Create(path) | Write(path) => {
                 let data = fs::read(&path).unwrap_or(Vec::new());
-                diffs.push(FsDiff::Write(strip_prefix(&path, &root)?, data))
+                diffs.push(FsDiff::Write(strip_prefix(&path, &root)?, Arc::new(data)))
             }
             Remove(path) => diffs.push(FsDiff::Del(strip_prefix(&path, &root)?)),
             Rename(from, to) => diffs.push(FsDiff::Move(

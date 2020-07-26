@@ -180,8 +180,11 @@ fn main() -> Result<()> {
 }
 
 // current problems:
-//  - ignore certain paths
+//  - ignore certain paths (based on .gitignore)
 //  - sync file permissions (e.g. execute bit) (there may be trouble supporting Windows...)
 //  - don't load entire file into memory, send it by streaming instead?
+//  - interface for sending/receiving diffs
+//  - operational transformation
+//  - editor integration
 //  - encryption with libsignal-protocol?
 //  - maybe other things? I forget
