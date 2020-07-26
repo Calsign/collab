@@ -1,5 +1,5 @@
 use crate::common::*;
-use std::{io, mem, net, sync::mpsc, thread};
+use std::{io, net, sync::mpsc, thread};
 
 const TCP_DELIM: u8 = b'\0';
 
@@ -109,18 +109,12 @@ pub fn add_peer(
 
 pub fn tcp_listener(
     state: &SharedState,
-    diff_sender: mpsc::Sender<Msg>,
+    diff_sender: &mpsc::Sender<Msg>,
     connect: Option<net::SocketAddr>,
-) -> Result<()> {
+) -> Result<net::SocketAddr> {
     // this picks an open port
     let socket = net::TcpListener::bind("127.0.0.1:0")?;
     let local_addr = socket.local_addr()?;
-    println!("Listening for connections on {}", local_addr);
-
-    {
-        let mut advertised_addr = state.advertised_addr.lock().unwrap();
-        mem::replace(&mut *advertised_addr, Some(local_addr));
-    }
 
     match connect {
         Some(addr) => {
@@ -130,12 +124,17 @@ pub fn tcp_listener(
         None => (),
     }
 
-    loop {
-        for stream in socket.incoming() {
-            match stream {
-                Ok(stream) => add_tcp_handler(&state, stream, diff_sender.clone())?,
-                Err(err) => println!("Failed connection: {}", err),
+    let (state, diff_sender) = (state.clone(), diff_sender.clone());
+    thread::spawn(move || -> Result<()> {
+        loop {
+            for stream in socket.incoming() {
+                match stream {
+                    Ok(stream) => add_tcp_handler(&state, stream, diff_sender.clone())?,
+                    Err(err) => println!("Failed connection: {}", err),
+                }
             }
         }
-    }
+    });
+
+    return Ok(local_addr);
 }

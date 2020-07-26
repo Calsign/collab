@@ -56,7 +56,6 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     let state = SharedState {
         register: Arc::new(Mutex::new(HashMap::new())),
         peers: Arc::new(Mutex::new(HashMap::new())),
-        advertised_addr: Arc::new(Mutex::new(None)),
     };
 
     {
@@ -75,10 +74,8 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
         thread::spawn(move || ipc::daemon(&root, msg_sender));
     }
 
-    {
-        let (state, msg_sender) = (state.clone(), msg_sender.clone());
-        thread::spawn(move || tcp::tcp_listener(&state, msg_sender, connect));
-    }
+    let addr = tcp::tcp_listener(&state, &msg_sender, connect)?;
+    println!("Listening for connections on {}", addr);
 
     let _fs_watcher = {
         let (root, msg_sender, state) = (root.clone(), msg_sender.clone(), state.clone());
@@ -128,11 +125,6 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                         MsgBody::IpcClient(IpcClientMsg::InfoRequest),
                         MsgSource::IpcClient(response_sender),
                     ) => {
-                        let addr = state
-                            .advertised_addr
-                            .lock()
-                            .unwrap()
-                            .expect("advertised addr not populated!");
                         let peers = state
                             .peers
                             .lock()

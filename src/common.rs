@@ -123,5 +123,4 @@ pub struct Msg {
 pub struct SharedState {
     pub register: Arc<Mutex<Reg>>,
     pub peers: Arc<Mutex<Peers>>,
-    pub advertised_addr: Arc<Mutex<Option<net::SocketAddr>>>,
 }
