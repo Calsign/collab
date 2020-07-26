@@ -1,131 +1,186 @@
-use notify::{DebouncedEvent, Watcher};
+mod cli;
+mod common;
+mod fs_watcher;
+mod ipc;
+mod tcp;
+
+use crate::common::*;
 use std::{
-    env, fs, io, net,
-    path::{Path, PathBuf},
+    collections::HashMap,
+    net,
+    path::PathBuf,
+    process,
     sync::mpsc,
+    sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("IO error")]
-    IoError(#[from] io::Error),
-    #[error("Strip prefix error")]
-    StripPrefixError(#[from] std::path::StripPrefixError),
-    #[error("Notify error")]
-    NotifyError(#[from] notify::Error),
-    #[error("Receive error")]
-    RecvError(#[from] mpsc::RecvError),
-    #[error("Send error")]
-    SendError(#[from] mpsc::SendError<FsDiff>),
-    #[error("Error: {0}")]
-    Error(String),
-}
+fn send_startup(
+    source_addr: net::SocketAddr,
+    advertised_addr: net::SocketAddr,
+    root: &PathBuf,
+    state: &SharedState,
+) -> Result<()> {
+    let mut peers = state.peers.lock().unwrap();
 
-type Result<T> = std::result::Result<T, Error>;
+    let sender = peers[&source_addr].sender.clone();
 
-fn strip_prefix(path: &PathBuf, prefix: &Path) -> Result<PathBuf> {
-    return Ok(PathBuf::from(path.strip_prefix(prefix)?));
-}
+    // update advertised address
+    peers.insert(
+        source_addr,
+        Peer {
+            sender: sender.clone(),
+            info: PeerInfo { advertised_addr },
+        },
+    );
 
-fn path_join(prefix: &Path, path: &Path) -> PathBuf {
-    return [prefix, path].iter().collect();
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub enum FsDiff {
-    Write(PathBuf, Vec<u8>),
-    NewDir(PathBuf),
-    Del(PathBuf),
-    Move(PathBuf, PathBuf),
-}
-
-impl FsDiff {
-    fn apply(&self, root: &Path) -> Result<()> {
-        match self {
-            FsDiff::Write(path, data) => fs::write(path_join(root, path), data)?,
-            FsDiff::NewDir(path) => fs::create_dir(path_join(root, path))?,
-            FsDiff::Del(path) => {
-                let full_path = path_join(root, path);
-                if fs::metadata(&full_path)?.is_dir() {
-                    fs::remove_dir(full_path)?;
-                } else {
-                    fs::remove_file(full_path)?;
-                }
-            }
-            FsDiff::Move(from, to) => fs::rename(path_join(root, from), path_join(root, to))?,
-        };
-
-        return Ok(());
-    }
-}
-
-fn initial_diffs(path: &Path) -> Result<Vec<FsDiff>> {
-    fn helper(path: PathBuf, prefix: &Path, list: &mut Vec<FsDiff>) -> Result<()> {
-        if fs::metadata(&path)?.is_dir() {
-            list.push(FsDiff::NewDir(strip_prefix(&path, prefix)?));
-            for entry in fs::read_dir(&path)? {
-                helper(entry?.path(), prefix, list)?;
-            }
-        } else {
-            let data = fs::read(&path).unwrap_or(Vec::new());
-            list.push(FsDiff::Write(path, data));
+    // inform new peer of other peers
+    for peer in peers.values() {
+        // don't tell the new connection about itself!
+        if peer.info.advertised_addr != advertised_addr {
+            sender.send(RemoteMsg::AddPeer(peer.info.advertised_addr))?;
         }
-        return Ok(());
     }
 
-    let mut list = Vec::new();
-    helper(path.to_path_buf(), path, &mut list)?;
-    return Ok(list);
+    let diffs = fs_watcher::load_fs(&root)?;
+    let mut register = state.register.lock().unwrap();
+    for diff in diffs {
+        diff.register(&mut register)?;
+        sender.send(RemoteMsg::Diff(diff))?;
+    }
+
+    return Ok(());
 }
 
-fn watch_fs(root: &Path, send: mpsc::Sender<FsDiff>) -> Result<()> {
-    let (notify_send, notify_receive) = mpsc::channel();
+fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
+    let state = SharedState {
+        register: Arc::new(Mutex::new(HashMap::new())),
+        peers: Arc::new(Mutex::new(HashMap::new())),
+        advertised_addr: Arc::new(Mutex::new(None)),
+    };
 
-    let mut watcher = notify::watcher(notify_send, Duration::from_millis(100))?;
-    watcher.watch(&root, notify::RecursiveMode::Recursive)?;
-
-    for diff in initial_diffs(&root)? {
-        send.send(diff)?;
+    {
+        let root = root.clone();
+        ctrlc::set_handler(move || {
+            ipc::daemon_cleanup(&root).expect("Failed to clean up!");
+            process::exit(0);
+        })
+        .expect("Failed to set sigint handler");
     }
+
+    let (msg_sender, msg_receiver) = mpsc::channel();
+
+    {
+        let (root, msg_sender) = (root.clone(), msg_sender.clone());
+        thread::spawn(move || ipc::daemon(&root, msg_sender));
+    }
+
+    {
+        let (state, msg_sender) = (state.clone(), msg_sender.clone());
+        thread::spawn(move || tcp::tcp_listener(&state, msg_sender, connect));
+    }
+
+    let _fs_watcher = {
+        let (root, msg_sender, state) = (root.clone(), msg_sender.clone(), state.clone());
+        thread::spawn(move || fs_watcher::watch_fs(&root, &state, msg_sender).expect("whoops"));
+    };
 
     loop {
-        let mut diffs = Vec::new();
-        match notify_receive.recv()? {
-            DebouncedEvent::Create(path) if path.is_dir() => {
-                diffs.push(FsDiff::NewDir(strip_prefix(&path, &root)?))
+        match msg_receiver.recv() {
+            Ok(msg) => {
+                println!("msg: {:?}", msg); // for testing
+                match (msg.body, msg.source) {
+                    (MsgBody::Remote(RemoteMsg::Diff(diff)), msg_source) => {
+                        let mut register = state.register.lock().unwrap();
+                        let changes_register = diff.changes_register(&mut register);
+
+                        if changes_register {
+                            diff.register(&mut register)?;
+
+                            match msg_source {
+                                MsgSource::Peer(_) => diff.apply(&root)?,
+                                MsgSource::Inotify => {
+                                    for peer in state.peers.lock().unwrap().values() {
+                                        peer.sender.send(RemoteMsg::Diff(diff.clone()))?;
+                                    }
+                                }
+                                MsgSource::IpcClient(_) => (),
+                            }
+                        }
+                    }
+                    (MsgBody::Remote(RemoteMsg::AddPeer(addr)), _) => {
+                        tcp::add_peer(&addr, &state, &msg_sender, None)?
+                    }
+                    (
+                        MsgBody::Remote(RemoteMsg::Startup(advertised_addr)),
+                        MsgSource::Peer(source_addr),
+                    ) => {
+                        send_startup(source_addr, advertised_addr, &root, &state)?;
+                    }
+                    (
+                        MsgBody::IpcClient(IpcClientMsg::ShutdownRequest),
+                        MsgSource::IpcClient(_),
+                    ) => {
+                        println!("Shutting down daemon...");
+                        return ipc::daemon_cleanup(&root);
+                    }
+                    (
+                        MsgBody::IpcClient(IpcClientMsg::InfoRequest),
+                        MsgSource::IpcClient(response_sender),
+                    ) => {
+                        let addr = state
+                            .advertised_addr
+                            .lock()
+                            .unwrap()
+                            .expect("advertised addr not populated!");
+                        let peers = state
+                            .peers
+                            .lock()
+                            .unwrap()
+                            .values()
+                            .map(|peer| peer.info.clone())
+                            .collect();
+                        response_sender
+                            .send(IpcClientResponse::Info(IpcClientInfo { addr, peers }))?;
+                    }
+                    _ => (),
+                };
             }
-            DebouncedEvent::Create(path) | DebouncedEvent::Write(path) => {
-                let data = fs::read(&path).unwrap_or(Vec::new());
-                diffs.push(FsDiff::Write(strip_prefix(&path, &root)?, data))
-            }
-            DebouncedEvent::Remove(path) => diffs.push(FsDiff::Del(strip_prefix(&path, &root)?)),
-            DebouncedEvent::Rename(from, to) => diffs.push(FsDiff::Move(
-                strip_prefix(&from, &root)?,
-                strip_prefix(&to, &root)?,
-            )),
-            _ => (),
-        }
-        for diff in diffs {
-            send.send(diff)?;
+            Err(err) => println!("{:?}", err),
         }
     }
 }
 
 fn main() -> Result<()> {
-    let root = env::current_dir()?;
+    use cli::{Cli, CliCommand::*};
 
-    let (diff_send, diff_receive) = mpsc::channel();
-    let fs_watcher = {
-        let root_clone = root.clone();
-        thread::spawn(move || watch_fs(&root_clone, diff_send).expect("whoops"));
+    let Cli { root, command } = cli::parse_cli()?;
+
+    match command {
+        Start { connect } => server(root, connect)?,
+        Stop => ipc::client_send_stop(&root)?,
+        Info => {
+            let info = ipc::client_get_info(&root)?;
+            println!("Address: {}", info.addr);
+            println!("Peers ({} total):", info.peers.len());
+            for peer in info.peers {
+                println!("  {}", peer.advertised_addr);
+            }
+        }
+        List => {
+            let active_sessions = ipc::get_active_sessions()?;
+            println!("Active sessions ({} total):", active_sessions.len());
+            for session_path in active_sessions {
+                println!("{}", session_path.display());
+            }
+        }
     };
 
-    loop {
-        match diff_receive.recv() {
-            Ok(diff) => println!("{:?}", diff),
-            Err(err) => (), //println!("{:?}", err),
-        }
-    }
+    return Ok(());
 }
+
+// current problems:
+//  - make a client cli with shm for interfacing with running daemon
+//  - ignore certain paths
+//  - don't load entire file into memory?
+//  - maybe other things? I forget
