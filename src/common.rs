@@ -1,10 +1,12 @@
 use std::{
     collections::HashMap,
     io, net,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc,
     sync::{Arc, Mutex},
 };
+
+use crate::collabignore;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -30,6 +32,8 @@ pub enum Error {
     IpcClientMsgSendError(#[from] mpsc::SendError<IpcClientMsg>),
     #[error("Send error (ipc client response)")]
     IpcClientResponseSendError(#[from] mpsc::SendError<IpcClientResponse>),
+    #[error("Gitignore error")]
+    GitignoreError(#[from] ignore::Error),
     #[error("Error: {0}")]
     Error(String),
 }
@@ -37,14 +41,6 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Reg = HashMap<PathBuf, FsReg>;
 pub type Peers = HashMap<net::SocketAddr, Peer>;
-
-pub fn strip_prefix(path: &PathBuf, prefix: &Path) -> Result<PathBuf> {
-    return Ok(PathBuf::from(path.strip_prefix(prefix)?));
-}
-
-pub fn path_join(prefix: &Path, path: &Path) -> PathBuf {
-    return [prefix, path].iter().collect();
-}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct PeerInfo {
@@ -123,4 +119,5 @@ pub struct Msg {
 pub struct SharedState {
     pub register: Arc<Mutex<Reg>>,
     pub peers: Arc<Mutex<Peers>>,
+    pub ignore: Arc<Mutex<collabignore::Ignore>>,
 }

@@ -1,4 +1,5 @@
 mod cli;
+mod collabignore;
 mod common;
 mod fs_watcher;
 mod ipc;
@@ -42,7 +43,7 @@ fn send_startup(
         }
     }
 
-    let diffs = fs_watcher::load_fs(&root)?;
+    let diffs = fs_watcher::load_fs(&root, state)?;
     let mut register = state.register.lock().unwrap();
     for diff in diffs {
         diff.register(&mut register)?;
@@ -56,6 +57,7 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     let state = SharedState {
         register: Arc::new(Mutex::new(HashMap::new())),
         peers: Arc::new(Mutex::new(HashMap::new())),
+        ignore: Arc::new(Mutex::new(collabignore::Ignore::new(&root))),
     };
 
     {
@@ -90,6 +92,8 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                     (MsgBody::Remote(RemoteMsg::Diff(diff)), msg_source) => {
                         let mut register = state.register.lock().unwrap();
                         let changes_register = diff.changes_register(&mut register);
+
+                        println!("changes register: {}", changes_register);
 
                         if changes_register {
                             diff.register(&mut register)?;
@@ -172,7 +176,6 @@ fn main() -> Result<()> {
 }
 
 // current problems:
-//  - ignore certain paths (based on .gitignore)
 //  - sync file permissions (e.g. execute bit) (there may be trouble supporting Windows...)
 //  - don't load entire file into memory, send it by streaming instead?
 //  - interface for sending/receiving diffs
