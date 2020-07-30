@@ -103,6 +103,8 @@ fn remove_data(key: &TmpKey) -> Result<()> {
 fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()> {
     use io::{BufRead, Write};
 
+    let addr = stream.peer_addr()?;
+
     let mut reader = io::BufReader::new(stream.try_clone()?);
     let mut writer = io::BufWriter::new(stream);
 
@@ -125,16 +127,24 @@ fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()
     loop {
         let mut data = Vec::new();
         match reader.read_until(TCP_DELIM, &mut data) {
-            Ok(0) => return Ok(()),
+            Ok(0) => {
+                response_sender.send(IpcClientResponse::LocalDisconnect)?;
+                sender.send(Msg {
+                    body: MsgBody::IpcClient(IpcClientMsg::LocalDisconnect),
+                    source: MsgSource::IpcClient(response_sender.clone(), addr),
+                })?;
+                return Ok(());
+            }
             Ok(size) => {
                 let msg = serde_json::from_slice(&data[..size - 1])?;
                 sender.send(Msg {
                     body: MsgBody::IpcClient(msg),
-                    source: MsgSource::IpcClient(response_sender.clone()),
+                    source: MsgSource::IpcClient(response_sender.clone(), addr),
                 })?;
             }
             Err(err) => {
                 println!("ipc error: {}", err);
+                response_sender.send(IpcClientResponse::LocalDisconnect)?;
                 return Err(Error::IoError(err));
             }
         }

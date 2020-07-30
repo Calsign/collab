@@ -6,6 +6,7 @@ pub enum CliCommand {
     Stop,
     Info,
     List,
+    Attach { file: PathBuf, mode: AttachMode },
 }
 
 pub struct Cli {
@@ -45,6 +46,27 @@ pub fn parse_cli() -> Result<Cli> {
         .subcommand(SubCommand::with_name("stop").about("Stop the current session"))
         .subcommand(SubCommand::with_name("info").about("Print info for current session"))
         .subcommand(SubCommand::with_name("list").about("List all active sessions"))
+        .subcommand(SubCommand::with_name("attach")
+                    .about("Used by editors to attach to files for publishing and receiving real-time changes")
+                    .arg(
+                        Arg::with_name("file")
+                            .short("f")
+                            .long("file")
+                            .value_name("FILE")
+                            .required(true)
+                            .help("File to attach to")
+                            .takes_value(true),
+                    )
+                    .arg(
+                        Arg::with_name("mode")
+                            .short("m")
+                            .long("mode")
+                            .value_name("MODE")
+                            .takes_value(true)
+                            .possible_values(&["json", "csv"])
+                            .default_value("json"),
+                    ),
+        )
         .get_matches();
 
     let root = matches
@@ -81,6 +103,15 @@ pub fn parse_cli() -> Result<Cli> {
         ("stop", _) => CliCommand::Stop,
         ("info", _) | (_, None) => CliCommand::Info,
         ("list", _) => CliCommand::List,
+        ("attach", Some(matches)) => {
+            let file = PathBuf::from(matches.value_of("file").unwrap()).canonicalize()?;
+            let mode = match matches.value_of("mode") {
+                Some("json") => AttachMode::Json,
+                Some("csv") => AttachMode::Csv,
+                _ => panic!("got invalid mode"),
+            };
+            CliCommand::Attach { file, mode }
+        }
         (subcommand, Some(_)) => panic!("unrecognized command: {}", subcommand),
     };
 

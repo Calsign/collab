@@ -1,3 +1,4 @@
+mod attach;
 mod cli;
 mod collabignore;
 mod common;
@@ -47,7 +48,7 @@ fn send_startup(
     let mut register = state.register.lock().unwrap();
     for diff in diffs {
         diff.register(&mut register)?;
-        sender.send(RemoteMsg::Diff(diff))?;
+        sender.send(RemoteMsg::FsDiff(diff))?;
     }
 
     return Ok(());
@@ -57,6 +58,7 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     let state = SharedState {
         register: Arc::new(Mutex::new(HashMap::new())),
         peers: Arc::new(Mutex::new(HashMap::new())),
+        attached_clients: Arc::new(Mutex::new(AttachedClients::new())),
         ignore: Arc::new(Mutex::new(collabignore::Ignore::new(&root))),
     };
 
@@ -89,11 +91,9 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
             Ok(msg) => {
                 println!("msg: {:?}", msg); // for testing
                 match (msg.body, msg.source) {
-                    (MsgBody::Remote(RemoteMsg::Diff(diff)), msg_source) => {
+                    (MsgBody::Remote(RemoteMsg::FsDiff(diff)), msg_source) => {
                         let mut register = state.register.lock().unwrap();
                         let changes_register = diff.changes_register(&mut register);
-
-                        println!("changes register: {}", changes_register);
 
                         if changes_register {
                             diff.register(&mut register)?;
@@ -102,12 +102,43 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                                 MsgSource::Peer(_) => diff.apply(&root)?,
                                 MsgSource::Inotify => {
                                     for peer in state.peers.lock().unwrap().values() {
-                                        peer.sender.send(RemoteMsg::Diff(diff.clone()))?;
+                                        peer.sender.send(RemoteMsg::FsDiff(diff.clone()))?;
                                     }
                                 }
-                                MsgSource::IpcClient(_) => (),
+                                MsgSource::IpcClient(_, _) => (),
                             }
                         }
+                    }
+                    (
+                        MsgBody::IpcClient(IpcClientMsg::AttachRequest(path)),
+                        MsgSource::IpcClient(sender, addr),
+                    ) => {
+                        // add the new client
+                        state
+                            .attached_clients
+                            .lock()
+                            .unwrap()
+                            .add(AttachedIpcClient { path, addr, sender });
+                    }
+                    (
+                        MsgBody::IpcClient(IpcClientMsg::LocalDisconnect),
+                        MsgSource::IpcClient(_, addr),
+                    ) => {
+                        // remove the client
+                        let mut clients = state.attached_clients.lock().unwrap();
+                        match clients.get_addr(&addr) {
+                            Some(client) => clients.remove(&client),
+                            None => (),
+                        };
+                    }
+                    (
+                        MsgBody::IpcClient(IpcClientMsg::BufferDiff(diff)),
+                        MsgSource::IpcClient(_, _),
+                    ) => {
+                        // TODO
+                    }
+                    (MsgBody::Remote(RemoteMsg::BufferDiff(diff)), MsgSource::Peer(peer)) => {
+                        // TODO
                     }
                     (MsgBody::Remote(RemoteMsg::AddPeer(addr)), _) => {
                         tcp::add_peer(&addr, &state, &msg_sender, None)?
@@ -120,14 +151,14 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                     }
                     (
                         MsgBody::IpcClient(IpcClientMsg::ShutdownRequest),
-                        MsgSource::IpcClient(_),
+                        MsgSource::IpcClient(_, _),
                     ) => {
                         println!("Shutting down daemon...");
                         return ipc::daemon_cleanup(&root);
                     }
                     (
                         MsgBody::IpcClient(IpcClientMsg::InfoRequest),
-                        MsgSource::IpcClient(response_sender),
+                        MsgSource::IpcClient(response_sender, _),
                     ) => {
                         let peers = state
                             .peers
@@ -170,6 +201,7 @@ fn main() -> Result<()> {
                 println!("{}", session_path.display());
             }
         }
+        Attach { file, mode } => attach::attach(&root, &file, mode)?,
     };
 
     return Ok(());
@@ -178,6 +210,7 @@ fn main() -> Result<()> {
 // current problems:
 //  - sync file permissions (e.g. execute bit) (there may be trouble supporting Windows...)
 //  - don't load entire file into memory, send it by streaming instead?
+//  - possibly place a hard limit on size of tracked files? (1 MB?)
 //  - interface for sending/receiving diffs
 //  - operational transformation
 //  - editor integration

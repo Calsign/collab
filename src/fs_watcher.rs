@@ -121,14 +121,14 @@ pub fn load_fs_and_send_parallel(
             for diff in diffs {
                 diff.register(&mut register)?;
                 send.send(Msg {
-                    body: MsgBody::Remote(RemoteMsg::Diff(diff)),
+                    body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                     source: MsgSource::Inotify,
                 })?;
             }
         } else {
             for diff in diffs {
                 send.send(Msg {
-                    body: MsgBody::Remote(RemoteMsg::Diff(diff)),
+                    body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                     source: MsgSource::Inotify,
                 })?;
             }
@@ -222,7 +222,7 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
         }
         for diff in diffs {
             send.send(Msg {
-                body: MsgBody::Remote(RemoteMsg::Diff(diff)),
+                body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                 source: MsgSource::Inotify,
             })?;
         }
