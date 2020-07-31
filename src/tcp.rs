@@ -57,7 +57,7 @@ fn tcp_handler(
                 })?;
             }
             Err(err) => {
-                println!("Peer disconnected: {}, error: {}", addr, err);
+                eprintln!("Peer disconnected: {}, error: {}", addr, err);
                 return disconnect_peer(state, &addr);
             }
         }
@@ -130,7 +130,7 @@ pub fn tcp_listener(
             for stream in socket.incoming() {
                 match stream {
                     Ok(stream) => add_tcp_handler(&state, stream, diff_sender.clone())?,
-                    Err(err) => println!("Failed connection: {}", err),
+                    Err(err) => eprintln!("Failed connection: {}", err),
                 }
             }
         }

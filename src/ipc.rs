@@ -143,7 +143,7 @@ fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()
                 })?;
             }
             Err(err) => {
-                println!("ipc error: {}", err);
+                eprintln!("ipc error: {}", err);
                 response_sender.send(IpcClientResponse::LocalDisconnect)?;
                 return Err(Error::IoError(err));
             }
@@ -167,7 +167,7 @@ pub fn daemon(root: &Path, sender: mpsc::Sender<Msg>) -> Result<()> {
                     let sender = sender.clone();
                     thread::spawn(move || daemon_thread(stream, sender));
                 }
-                Err(err) => println!("Failed ipc connection: {}", err),
+                Err(err) => eprintln!("Failed ipc connection: {}", err),
             }
         }
     }
@@ -225,7 +225,7 @@ pub fn client(
                     response_sender.send(response)?;
                 }
                 Err(err) => {
-                    println!("ipc error: {}", err);
+                    eprintln!("ipc error: {}", err);
                     response_sender.send(IpcClientResponse::RemoteDisconnect)?;
                     return Err(Error::IoError(err));
                 }

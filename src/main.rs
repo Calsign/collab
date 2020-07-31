@@ -173,7 +173,7 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                     _ => (),
                 };
             }
-            Err(err) => println!("{:?}", err),
+            Err(err) => eprintln!("{:?}", err),
         }
     }
 }

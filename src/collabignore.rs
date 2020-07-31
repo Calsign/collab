@@ -47,7 +47,7 @@ impl Ignore {
             match self.rebuild() {
                 Ok(()) => (),
                 Err(err) => {
-                    println!("error rebuilding ignore: {}", err);
+                    eprintln!("error rebuilding ignore: {}", err);
                     return Err(err);
                 }
             }
