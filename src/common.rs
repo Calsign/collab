@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap,
-    io, net,
+    collections::{HashMap, HashSet},
+    hash, io, net,
     path::{Path, PathBuf},
     sync::mpsc,
     sync::{Arc, Mutex},
@@ -59,17 +59,38 @@ pub struct Peer {
     pub info: PeerInfo,
 }
 
-#[derive(Clone, Debug)]
-pub struct AttachedIpcClient {
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+pub struct AttachedIpcClientInfo {
     pub path: PathBuf,
     pub addr: net::SocketAddr,
+    pub desc: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct AttachedIpcClient {
     pub sender: mpsc::Sender<IpcClientResponse>,
+    pub info: AttachedIpcClientInfo,
+}
+
+impl PartialEq for AttachedIpcClient {
+    fn eq(&self, other: &Self) -> bool {
+        return self.info == other.info;
+    }
+}
+
+impl Eq for AttachedIpcClient {}
+
+impl hash::Hash for AttachedIpcClient {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.info.hash(state);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct IpcClientInfo {
     pub addr: net::SocketAddr,
     pub peers: Vec<PeerInfo>,
+    pub attached_clients: Vec<AttachedIpcClientInfo>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -108,7 +129,7 @@ pub enum RemoteMsg {
 pub enum IpcClientMsg {
     ShutdownRequest,
     InfoRequest,
-    AttachRequest(PathBuf),
+    AttachRequest { path: PathBuf, desc: String },
     BufferDiff(BufferDiff),
     LocalDisconnect,
 }
@@ -142,7 +163,7 @@ pub struct Msg {
 
 #[derive(Debug)]
 pub struct AttachedClients {
-    by_path: HashMap<PathBuf, AttachedIpcClient>,
+    by_path: HashMap<PathBuf, HashSet<AttachedIpcClient>>,
     by_addr: HashMap<net::SocketAddr, AttachedIpcClient>,
 }
 
@@ -155,24 +176,46 @@ impl AttachedClients {
     }
 
     pub fn add(&mut self, client: AttachedIpcClient) {
-        self.by_path.insert(client.path.clone(), client.clone());
-        self.by_addr.insert(client.addr, client);
+        match self.by_path.get_mut(&client.info.path) {
+            Some(set) => {
+                set.insert(client.clone());
+            }
+            None => {
+                let mut set = HashSet::new();
+                set.insert(client.clone());
+                self.by_path.insert(client.info.path.clone(), set);
+            }
+        }
+        self.by_addr.insert(client.info.addr, client);
     }
 
     pub fn remove(&mut self, client: &AttachedIpcClient) {
-        self.by_path.remove(&client.path);
-        self.by_addr.remove(&client.addr);
+        match self.by_path.get_mut(&client.info.path) {
+            Some(set) => {
+                set.remove(&client);
+                if set.is_empty() {
+                    self.by_path.remove(&client.info.path);
+                }
+            }
+            None => panic!("inconsistent attached clients data structure"),
+        }
+        self.by_path.remove(&client.info.path);
+        self.by_addr.remove(&client.info.addr);
     }
 
-    pub fn get_path(&self, path: &Path) -> Option<AttachedIpcClient> {
-        return self
-            .by_path
-            .get(&PathBuf::from(path))
-            .map(AttachedIpcClient::clone);
+    pub fn get_path(&self, path: &Path) -> HashSet<AttachedIpcClient> {
+        return match self.by_path.get(&PathBuf::from(path)) {
+            Some(set) => set.clone(),
+            None => HashSet::new(),
+        };
     }
 
     pub fn get_addr(&self, addr: &net::SocketAddr) -> Option<AttachedIpcClient> {
         return self.by_addr.get(addr).map(AttachedIpcClient::clone);
+    }
+
+    pub fn all(&self) -> impl Iterator<Item = &AttachedIpcClient> {
+        return self.by_addr.values();
     }
 }
 

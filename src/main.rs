@@ -110,7 +110,7 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                         }
                     }
                     (
-                        MsgBody::IpcClient(IpcClientMsg::AttachRequest(path)),
+                        MsgBody::IpcClient(IpcClientMsg::AttachRequest { path, desc }),
                         MsgSource::IpcClient(sender, addr),
                     ) => {
                         // add the new client
@@ -118,7 +118,10 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                             .attached_clients
                             .lock()
                             .unwrap()
-                            .add(AttachedIpcClient { path, addr, sender });
+                            .add(AttachedIpcClient {
+                                info: AttachedIpcClientInfo { path, desc, addr },
+                                sender,
+                            });
                     }
                     (
                         MsgBody::IpcClient(IpcClientMsg::LocalDisconnect),
@@ -134,9 +137,7 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                     (
                         MsgBody::IpcClient(IpcClientMsg::BufferDiff(diff)),
                         MsgSource::IpcClient(_, _),
-                    ) => {
-                        // TODO
-                    }
+                    ) => {}
                     (MsgBody::Remote(RemoteMsg::BufferDiff(diff)), MsgSource::Peer(peer)) => {
                         // TODO
                     }
@@ -167,8 +168,18 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                             .values()
                             .map(|peer| peer.info.clone())
                             .collect();
-                        response_sender
-                            .send(IpcClientResponse::Info(IpcClientInfo { addr, peers }))?;
+                        let attached_clients = state
+                            .attached_clients
+                            .lock()
+                            .unwrap()
+                            .all()
+                            .map(|client| client.info.clone())
+                            .collect();
+                        response_sender.send(IpcClientResponse::Info(IpcClientInfo {
+                            addr,
+                            peers,
+                            attached_clients,
+                        }))?;
                     }
                     _ => (),
                 };
@@ -193,6 +204,10 @@ fn main() -> Result<()> {
             for peer in info.peers {
                 println!("  {}", peer.advertised_addr);
             }
+            println!("Attached clients ({} total):", info.attached_clients.len());
+            for client in info.attached_clients {
+                println!("  {}: {}", client.desc, client.path.to_str().unwrap());
+            }
         }
         List => {
             let active_sessions = ipc::get_active_sessions()?;
@@ -201,7 +216,7 @@ fn main() -> Result<()> {
                 println!("{}", session_path.display());
             }
         }
-        Attach { file, mode } => attach::attach(&root, &file, mode)?,
+        Attach { file, desc, mode } => attach::attach(&root, &file, desc, mode)?,
     };
 
     return Ok(());

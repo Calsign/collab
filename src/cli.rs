@@ -2,11 +2,17 @@ use crate::common::*;
 use std::{env, fs, net, path::PathBuf};
 
 pub enum CliCommand {
-    Start { connect: Option<net::SocketAddr> },
+    Start {
+        connect: Option<net::SocketAddr>,
+    },
     Stop,
     Info,
     List,
-    Attach { file: PathBuf, mode: AttachMode },
+    Attach {
+        file: PathBuf,
+        desc: String,
+        mode: AttachMode,
+    },
 }
 
 pub struct Cli {
@@ -58,6 +64,15 @@ pub fn parse_cli() -> Result<Cli> {
                             .takes_value(true),
                     )
                     .arg(
+                        Arg::with_name("description")
+                            .short("d")
+                            .long("description")
+                            .value_name("DESCRIPTION")
+                            .required(true)
+                            .help("Description of attached editor")
+                            .takes_value(true),
+                    )
+                    .arg(
                         Arg::with_name("mode")
                             .short("m")
                             .long("mode")
@@ -105,12 +120,13 @@ pub fn parse_cli() -> Result<Cli> {
         ("list", _) => CliCommand::List,
         ("attach", Some(matches)) => {
             let file = PathBuf::from(matches.value_of("file").unwrap()).canonicalize()?;
+            let desc = String::from(matches.value_of("description").unwrap());
             let mode = match matches.value_of("mode") {
                 Some("json") => AttachMode::Json,
                 Some("csv") => AttachMode::Csv,
                 _ => panic!("got invalid mode"),
             };
-            CliCommand::Attach { file, mode }
+            CliCommand::Attach { file, desc, mode }
         }
         (subcommand, Some(_)) => panic!("unrecognized command: {}", subcommand),
     };

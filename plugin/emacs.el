@@ -42,7 +42,7 @@
        collab-subprocess
        (make-process
         :name "emacs-collab-attach"
-        :command (list collab-command-name "attach" "-m" "json" "-f" path)
+        :command (list collab-command-name "attach" "-m" "json" "-f" path "-d" "Emacs")
         :filter 'collab-process-filter
         :sentinel 'collab-process-sentinel
         :noquery t)))))
