@@ -75,8 +75,8 @@ pub struct IpcClientInfo {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct BufferDiff {
     pub pos: u32,
-    pub before: String,
-    pub after: String,
+    pub old_len: u32,
+    pub new_str: String,
 }
 
 #[derive(PartialEq, Eq, Debug)]
