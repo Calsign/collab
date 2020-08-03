@@ -136,10 +136,30 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
                     }
                     (
                         MsgBody::IpcClient(IpcClientMsg::BufferDiff(diff)),
-                        MsgSource::IpcClient(_, _),
-                    ) => {}
-                    (MsgBody::Remote(RemoteMsg::BufferDiff(diff)), MsgSource::Peer(peer)) => {
-                        // TODO
+                        MsgSource::IpcClient(_, addr),
+                    ) => {
+                        let clients = state.attached_clients.lock().unwrap();
+                        let path = clients.get_addr(&addr).unwrap().info.path;
+                        for client in clients.get_path(&path) {
+                            if addr != client.info.addr {
+                                client
+                                    .sender
+                                    .send(IpcClientResponse::BufferDiff(diff.clone()))?;
+                            }
+                        }
+                        let peers = state.peers.lock().unwrap();
+                        for peer in peers.values() {
+                            peer.sender
+                                .send(RemoteMsg::BufferDiff(path.clone(), diff.clone()))?;
+                        }
+                    }
+                    (MsgBody::Remote(RemoteMsg::BufferDiff(path, diff)), MsgSource::Peer(peer)) => {
+                        let clients = state.attached_clients.lock().unwrap();
+                        for client in clients.get_path(&path) {
+                            client
+                                .sender
+                                .send(IpcClientResponse::BufferDiff(diff.clone()))?;
+                        }
                     }
                     (MsgBody::Remote(RemoteMsg::AddPeer(addr)), _) => {
                         tcp::add_peer(&addr, &state, &msg_sender, None)?

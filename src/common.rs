@@ -119,7 +119,7 @@ pub enum FsDiff {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum RemoteMsg {
     FsDiff(FsDiff),
-    BufferDiff(BufferDiff),
+    BufferDiff(PathBuf, BufferDiff),
     AddPeer(net::SocketAddr),
     Startup(net::SocketAddr),
     LocalDisconnect,
