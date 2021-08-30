@@ -1,10 +1,12 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash, io, net,
+    fs, hash, io, net,
     path::{Path, PathBuf},
     sync::mpsc,
     sync::{Arc, Mutex},
 };
+
+pub use relative_path::{RelativePath, RelativePathBuf};
 
 use crate::collabignore;
 
@@ -40,13 +42,23 @@ pub enum Error {
     GitignoreError(#[from] ignore::Error),
     #[error("UTF-8 parsing error")]
     Utf8Error(#[from] std::str::Utf8Error),
+    #[error("Relative path error")]
+    RelativePathError(#[from] relative_path::FromPathError),
     #[error("Error: {0}")]
     Error(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type Reg = HashMap<PathBuf, FsReg>;
+pub type Reg = HashMap<RelativePathBuf, FsReg>;
 pub type Peers = HashMap<net::SocketAddr, Peer>;
+
+pub fn strip_prefix(path: &Path, prefix: &Path) -> Result<RelativePathBuf> {
+    return Ok(RelativePathBuf::from_path(path.strip_prefix(prefix)?)?);
+}
+
+pub fn path_join(prefix: &Path, path: &RelativePath) -> PathBuf {
+    return path.to_path(prefix);
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct PeerInfo {
@@ -61,7 +73,7 @@ pub struct Peer {
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 pub struct AttachedIpcClientInfo {
-    pub path: PathBuf,
+    pub path: RelativePathBuf,
     pub addr: net::SocketAddr,
     pub desc: String,
 }
@@ -100,18 +112,64 @@ pub struct BufferDiff {
     pub new_str: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct FilePerm {
+    pub readonly: bool,
+    pub executable: bool,
+}
+
+impl FilePerm {
+    pub fn get(path: &Path) -> Result<Self> {
+        let perms = fs::metadata(&path)?.permissions();
+        return Ok(Self {
+            readonly: perms.readonly(),
+            executable: if cfg!(target_family = "unix") {
+                use std::os::unix::fs::PermissionsExt;
+                // get user execute bit
+                let user = (perms.mode() & 0o700) >> 6;
+                user % 2 == 1
+            } else {
+                false
+            },
+        });
+    }
+
+    pub fn set(&self, path: &Path) -> Result<()> {
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_readonly(self.readonly);
+        if cfg!(target_family = "unix") {
+            use std::os::unix::fs::PermissionsExt;
+            let mut mode = perms.mode();
+            let user = (perms.mode() & 0o700) >> 6;
+            // TODO set all execute bits, not just user bit?
+            if user % 2 == 0 && self.executable {
+                // set execute bit
+                mode += 0o100;
+                perms.set_mode(mode);
+            } else if user % 2 == 1 && !self.executable {
+                // unset execute bit
+                mode -= 0o100;
+                perms.set_mode(mode);
+            }
+        }
+        fs::set_permissions(&path, perms)?;
+        return Ok(());
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum FsReg {
-    File(Arc<Vec<u8>>),
+    File(Arc<Vec<u8>>, Option<FilePerm>),
     Dir,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum FsDiff {
-    Write(PathBuf, Arc<Vec<u8>>),
-    NewDir(PathBuf),
-    Del(PathBuf),
-    Move(PathBuf, PathBuf),
+    Write(RelativePathBuf, Arc<Vec<u8>>),
+    NewDir(RelativePathBuf),
+    Del(RelativePathBuf),
+    Move(RelativePathBuf, RelativePathBuf),
+    Chmod(RelativePathBuf, FilePerm),
 }
 
 // TODO: this type structure is a mess. clean it up, please??
@@ -119,7 +177,7 @@ pub enum FsDiff {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum RemoteMsg {
     FsDiff(FsDiff),
-    BufferDiff(PathBuf, BufferDiff),
+    BufferDiff(RelativePathBuf, BufferDiff),
     AddPeer(net::SocketAddr),
     Startup(net::SocketAddr),
     LocalDisconnect,
@@ -129,7 +187,7 @@ pub enum RemoteMsg {
 pub enum IpcClientMsg {
     ShutdownRequest,
     InfoRequest,
-    AttachRequest { path: PathBuf, desc: String },
+    AttachRequest { path: RelativePathBuf, desc: String },
     BufferDiff(BufferDiff),
     LocalDisconnect,
 }
@@ -163,7 +221,7 @@ pub struct Msg {
 
 #[derive(Debug)]
 pub struct AttachedClients {
-    by_path: HashMap<PathBuf, HashSet<AttachedIpcClient>>,
+    by_path: HashMap<RelativePathBuf, HashSet<AttachedIpcClient>>,
     by_addr: HashMap<net::SocketAddr, AttachedIpcClient>,
 }
 
@@ -203,8 +261,8 @@ impl AttachedClients {
         self.by_addr.remove(&client.info.addr);
     }
 
-    pub fn get_path(&self, path: &Path) -> HashSet<AttachedIpcClient> {
-        return match self.by_path.get(&PathBuf::from(path)) {
+    pub fn get_path(&self, path: &RelativePath) -> HashSet<AttachedIpcClient> {
+        return match self.by_path.get(path) {
             Some(set) => set.clone(),
             None => HashSet::new(),
         };

@@ -62,10 +62,21 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
         ignore: Arc::new(Mutex::new(collabignore::Ignore::new(&root))),
     };
 
+    if ipc::has_active_session(&root)? {
+        return Err(Error::Error(
+            "A session is already started in this directory!".to_string(),
+        ));
+    }
+
     {
         let root = root.clone();
         ctrlc::set_handler(move || {
-            ipc::daemon_cleanup(&root).expect("Failed to clean up!");
+            match ipc::daemon_cleanup(&root) {
+                Ok(()) => (),
+                Err(err) => {
+                    eprintln!("Error cleaning up: {}", err);
+                }
+            }
             process::exit(0);
         })
         .expect("Failed to set sigint handler");
@@ -226,7 +237,7 @@ fn main() -> Result<()> {
             }
             println!("Attached clients ({} total):", info.attached_clients.len());
             for client in info.attached_clients {
-                println!("  {}: {}", client.desc, client.path.to_str().unwrap());
+                println!("  {}: {}", client.desc, client.path.as_str());
             }
         }
         List => {
@@ -247,6 +258,7 @@ fn main() -> Result<()> {
 //  - don't load entire file into memory, send it by streaming instead?
 //  - possibly place a hard limit on size of tracked files? (1 MB?)
 //  - interface for sending/receiving diffs
+//  - connect without having to delete existing files in directory
 //  - operational transformation
 //  - editor integration
 //  - encryption with libsignal-protocol?

@@ -54,6 +54,10 @@ fn find_key(path: &Path) -> Result<Option<TmpKey>> {
     return Ok(None);
 }
 
+pub fn has_active_session(path: &Path) -> Result<bool> {
+    return Ok(find_key(path)?.is_some());
+}
+
 pub fn get_active_sessions() -> Result<Vec<PathBuf>> {
     let mut list = Vec::new();
     let temp_dir = get_temp_dir();

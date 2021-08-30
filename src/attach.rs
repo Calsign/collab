@@ -2,7 +2,7 @@ use crate::common::*;
 use crate::ipc;
 use std::{
     io::{self, BufRead},
-    path::{Path, PathBuf},
+    path::Path,
     str, thread,
 };
 
@@ -53,7 +53,7 @@ pub fn attach(root: &Path, file: &Path, desc: String, mode: AttachMode) -> Resul
     });
 
     sender.send(IpcClientMsg::AttachRequest {
-        path: PathBuf::from(&path),
+        path: strip_prefix(&path, root)?,
         desc,
     })?;
 

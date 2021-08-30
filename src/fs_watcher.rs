@@ -8,15 +8,8 @@ use std::{
     thread, time,
 };
 
-fn strip_prefix(path: &PathBuf, prefix: &Path) -> Result<PathBuf> {
-    return Ok(PathBuf::from(path.strip_prefix(prefix)?));
-}
-
-fn path_join(prefix: &Path, path: &Path) -> PathBuf {
-    return [prefix, path].iter().collect();
-}
-
 impl FsDiff {
+    /// Apply this FsDiff to the local filesystem
     pub fn apply(&self, root: &Path) -> Result<()> {
         use FsDiff::*;
         match self {
@@ -31,17 +24,25 @@ impl FsDiff {
                 }
             }
             Move(from, to) => fs::rename(path_join(root, from), path_join(root, to))?,
+            Chmod(path, perm) => {
+                perm.set(&path_join(root, path))?;
+            }
         };
 
         return Ok(());
     }
 
+    /// Register this FsDiff to the file registry
     pub fn register(&self, reg: &mut Reg) -> Result<()> {
         use FsDiff::*;
         use FsReg::*;
         return match self {
             Write(path, data) => {
-                reg.insert(path.clone(), File(data.clone()));
+                let perm = match reg.get(path) {
+                    Some(FsReg::File(_, Some(perm))) => Some(perm.clone()),
+                    _ => None,
+                };
+                reg.insert(path.clone(), File(data.clone(), perm));
                 Ok(())
             }
             NewDir(path) => {
@@ -59,15 +60,26 @@ impl FsDiff {
                 }
                 None => Ok(()),
             },
+            Chmod(path, perm) => {
+                let data = match reg.get(path) {
+                    Some(FsReg::File(data, _)) => data.clone(),
+                    _ => {
+                        return Err(Error::Error("".to_string()));
+                    }
+                };
+                reg.insert(path.clone(), File(data, Some(perm.clone())));
+                Ok(())
+            }
         };
     }
 
+    /// Returns true if this FsDiff would would update the file registry
     pub fn changes_register(&self, reg: &mut Reg) -> bool {
         use FsDiff::*;
         use FsReg::*;
         return match self {
             Write(path, data) => match reg.get(path) {
-                Some(File(prev_data)) => data != prev_data,
+                Some(File(prev_data, _)) => data != prev_data,
                 None => true,
                 _ => false,
             },
@@ -84,6 +96,12 @@ impl FsDiff {
                 (Some(from_file), Some(to_file)) => from_file != to_file,
                 _ => false,
             },
+            Chmod(path, perm) => {
+                return match reg.get(path) {
+                    Some(File(_, old_perm)) => Some(perm) != old_perm.as_ref(),
+                    _ => false,
+                }
+            }
         };
     }
 }
@@ -93,12 +111,13 @@ pub fn load_fs(root: &Path, state: &SharedState) -> Result<Vec<FsDiff>> {
     for entry in collabignore::build_walker(root) {
         let entry = entry?;
         let path = entry.path();
-        let stripped_path = PathBuf::from(path.strip_prefix(root)?);
+        let stripped_path = strip_prefix(path, root)?;
         if entry.metadata()?.is_dir() {
             list.push(FsDiff::NewDir(stripped_path));
         } else {
             let data = fs::read(&path).unwrap_or(Vec::new());
-            list.push(FsDiff::Write(stripped_path, Arc::new(data)));
+            list.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
+            list.push(FsDiff::Chmod(stripped_path, FilePerm::get(path)?));
             if collabignore::is_ignore_file(path) {
                 state.ignore.lock().unwrap().ignore_file_modified(path)?;
             }
@@ -172,7 +191,9 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
                 }
                 if !ignore.is_ignored(&path) {
                     let data = fs::read(&path).unwrap_or(Vec::new());
-                    diffs.push(FsDiff::Write(strip_prefix(&path, &root)?, Arc::new(data)))
+                    let relative_path = strip_prefix(&path, &root)?;
+                    diffs.push(FsDiff::Write(relative_path.clone(), Arc::new(data)));
+                    diffs.push(FsDiff::Chmod(relative_path, FilePerm::get(&path)?));
                 }
             }
             Remove(path) => {
@@ -215,7 +236,18 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
                 } else if !ignored_to {
                     // looks file is being created
                     let data = fs::read(&to).unwrap_or(Vec::new());
-                    diffs.push(FsDiff::Write(strip_prefix(&to, &root)?, Arc::new(data)));
+                    let stripped_path = strip_prefix(&to, &root)?;
+                    diffs.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
+                    diffs.push(FsDiff::Chmod(stripped_path, FilePerm::get(&to)?));
+                }
+            }
+            Chmod(path) => {
+                let ignore = state.ignore.lock().unwrap();
+                if !ignore.is_ignored(&path) {
+                    diffs.push(FsDiff::Chmod(
+                        strip_prefix(&path, &root)?,
+                        FilePerm::get(&path)?,
+                    ));
                 }
             }
             _ => (),
