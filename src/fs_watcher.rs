@@ -42,7 +42,7 @@ impl FsDiff {
                     Some(FsReg::File(_, Some(perm))) => Some(perm.clone()),
                     _ => None,
                 };
-                reg.insert(path.clone(), File(data.clone(), perm));
+                reg.insert(path.clone(), File(hash_file(data), perm));
                 Ok(())
             }
             NewDir(path) => {
@@ -79,7 +79,7 @@ impl FsDiff {
         use FsReg::*;
         return match self {
             Write(path, data) => match reg.get(path) {
-                Some(File(prev_data, _)) => data != prev_data,
+                Some(File(prev_data, _)) => &hash_file(data) != prev_data,
                 None => true,
                 _ => false,
             },

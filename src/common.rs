@@ -1,6 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fs, hash, io, net,
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    fs, hash,
+    hash::{Hash, Hasher},
+    io, net,
     path::{Path, PathBuf},
     sync::mpsc,
     sync::{Arc, Mutex},
@@ -159,7 +161,7 @@ impl FilePerm {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum FsReg {
-    File(Arc<Vec<u8>>, Option<FilePerm>),
+    File(u64, Option<FilePerm>),
     Dir,
 }
 
@@ -289,4 +291,10 @@ pub struct SharedState {
 pub enum AttachMode {
     Json,
     Csv,
+}
+
+pub fn hash_file(data: &Arc<Vec<u8>>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    return hasher.finish();
 }
