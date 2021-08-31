@@ -254,7 +254,6 @@ fn main() -> Result<()> {
 }
 
 // current problems:
-//  - sync file permissions (e.g. execute bit) (there may be trouble supporting Windows...)
 //  - don't load entire file into memory, send it by streaming instead?
 //  - possibly place a hard limit on size of tracked files? (1 MB?)
 //  - interface for sending/receiving diffs

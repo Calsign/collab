@@ -32,7 +32,7 @@ fn unparse_csv(diff: &BufferDiff) -> Result<String> {
 pub fn attach(root: &Path, file: &Path, desc: String, mode: AttachMode) -> Result<()> {
     let (sender, receiver) = ipc::client(&root)?;
 
-    let path = file.strip_prefix(root)?;
+    let path = strip_prefix(file, root)?;
 
     thread::spawn(move || -> Result<()> {
         loop {
@@ -52,10 +52,7 @@ pub fn attach(root: &Path, file: &Path, desc: String, mode: AttachMode) -> Resul
         }
     });
 
-    sender.send(IpcClientMsg::AttachRequest {
-        path: strip_prefix(&path, root)?,
-        desc,
-    })?;
+    sender.send(IpcClientMsg::AttachRequest { path, desc })?;
 
     loop {
         for line in io::stdin().lock().lines() {
