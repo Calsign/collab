@@ -2,6 +2,7 @@ use crate::common::*;
 use std::{
     env, fs, io, net,
     path::{Path, PathBuf},
+    process,
     sync::mpsc,
     thread,
 };
@@ -11,6 +12,7 @@ const TCP_DELIM: u8 = b'\0';
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct TmpData {
     pub port: u16,
+    pub pid: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -42,13 +44,34 @@ fn get_key(path: &Path) -> Result<TmpKey> {
     }
 }
 
+/// Checks to make sure the process associated with the given pid is still alive.
+/// If it is alive, returns true; if it is dead, deletes the key file and returns false.
+fn verify_key(key: &TmpKey) -> Result<bool> {
+    let data = load_data(key)?;
+    if cfg!(target_family = "unix") {
+        let res: i32;
+        unsafe {
+            res = libc::kill(data.pid, 0);
+        };
+        return Ok(if res == 0 {
+            true
+        } else {
+            fs::remove_file(&key.path)?;
+            false
+        });
+    } else {
+        // TODO: test process liveness on other platforms
+        return Ok(true);
+    }
+}
+
 /// Traverses upward in the directory structure until a directory
 /// with an active key is found.
 fn find_key(path: &Path) -> Result<Option<TmpKey>> {
     for ancestor in path.ancestors() {
         let key = get_key(&ancestor)?;
         if key.exists() {
-            return Ok(Some(key));
+            return Ok(if verify_key(&key)? { Some(key) } else { None });
         }
     }
     return Ok(None);
@@ -69,8 +92,10 @@ pub fn get_active_sessions() -> Result<Vec<PathBuf>> {
             if path.is_file() {
                 match entry.file_name().to_str() {
                     Some(name) => {
-                        let replaced = name.replace("!", "/");
-                        list.push(PathBuf::from(replaced));
+                        if verify_key(&TmpKey { path })? {
+                            let replaced = name.replace("!", "/");
+                            list.push(PathBuf::from(replaced));
+                        }
                     }
                     None => (),
                 }
@@ -157,13 +182,21 @@ fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()
 }
 
 pub fn daemon(root: &Path, sender: mpsc::Sender<Msg>) -> Result<()> {
+    use std::convert::TryFrom;
+
     let key = get_key(&root)?;
 
     let socket = net::TcpListener::bind("127.0.0.1:0")?;
     let addr = socket.local_addr()?;
 
     println!("writing data: {:?}", key);
-    write_data(&key, TmpData { port: addr.port() })?;
+    write_data(
+        &key,
+        TmpData {
+            port: addr.port(),
+            pid: i32::try_from(process::id()).unwrap(),
+        },
+    )?;
 
     loop {
         for stream in socket.incoming() {

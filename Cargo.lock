@@ -111,6 +111,7 @@ dependencies = [
  "csv",
  "ctrlc",
  "ignore",
+ "libc",
  "notify",
  "relative-path",
  "serde",
