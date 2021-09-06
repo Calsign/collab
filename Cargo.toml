@@ -16,3 +16,8 @@ ctrlc = { version = "3", features = ["termination"] }
 ignore = "0.4"
 csv = "1"
 relative-path = { version = "1", features = ["serde"]  }
+
+[dev-dependencies]
+test_common = { path = "test_common" }
+tempdir = "0.3"
+assert_cmd = "2.0.0"

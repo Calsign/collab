@@ -220,11 +220,8 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     }
 }
 
-fn main() -> Result<()> {
-    use cli::{Cli, CliCommand::*};
-
-    let Cli { root, command } = cli::parse_cli()?;
-
+fn handle_command(root: PathBuf, command: cli::CliCommand) -> Result<()> {
+    use cli::CliCommand::*;
     match command {
         Start { connect } => server(root, connect)?,
         Stop => ipc::client_send_stop(&root)?,
@@ -251,6 +248,12 @@ fn main() -> Result<()> {
     };
 
     return Ok(());
+}
+
+fn main() -> Result<()> {
+    use cli::Cli;
+    let Cli { root, command } = cli::parse_cli()?;
+    return handle_command(root, command);
 }
 
 // current problems:

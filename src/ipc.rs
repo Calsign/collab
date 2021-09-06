@@ -64,11 +64,12 @@ pub fn get_active_sessions() -> Result<Vec<PathBuf>> {
 
     if temp_dir.exists() {
         for entry in fs::read_dir(temp_dir)? {
-            let path = entry?.path();
+            let entry = entry?;
+            let path = entry.path();
             if path.is_file() {
-                match path.as_os_str().to_str() {
-                    Some(str) => {
-                        let replaced = str.replace("!", "/");
+                match entry.file_name().to_str() {
+                    Some(name) => {
+                        let replaced = name.replace("!", "/");
                         list.push(PathBuf::from(replaced));
                     }
                     None => (),

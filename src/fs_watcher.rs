@@ -159,6 +159,10 @@ pub fn load_fs_and_send_parallel(
 pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Result<()> {
     use notify::{watcher, DebouncedEvent::*, RecursiveMode, Watcher};
 
+    // set up root dir
+    fs::create_dir_all(root)?;
+    FsDiff::NewDir(RelativePathBuf::from("")).register(&mut state.register.lock().unwrap())?;
+
     let (notify_send, notify_receive) = mpsc::channel();
 
     let mut watcher = watcher(notify_send, time::Duration::from_millis(100))?;
