@@ -26,12 +26,12 @@ macro_rules! dir(
             $(
                 map.insert($name.to_string(), $contents);
             )+
-            test_common::file_node::Node::Dir(map)
+            crate::files::Node::Dir(map)
         }
     };
     { } => {
         {
-            test_common::file_node::Node::Dir(std::collections::HashMap::new())
+            crate::files::Node::Dir(std::collections::HashMap::new())
         }
     }
 );
@@ -40,7 +40,7 @@ macro_rules! dir(
 macro_rules! file(
     { $contents:expr } => {
         {
-            test_common::file_node::Node::File(test_common::file_node::File {
+            crate::files::Node::File(crate::files::File {
                 data: $contents.to_string()
             })
         }
@@ -54,12 +54,12 @@ pub enum PathNode {
 }
 
 impl Node<File> {
-    pub fn apply(&self, root: &Path) -> common::Result<()> {
+    pub fn apply<P: AsRef<Path>>(&self, root: &P) -> common::Result<()> {
         match &self {
             Node::Dir(files) => {
                 fs::create_dir_all(root)?;
                 for (name, node) in files {
-                    let mut path = root.to_path_buf();
+                    let mut path = root.as_ref().to_path_buf();
                     path.push(name);
                     node.apply(&path)?;
                 }
@@ -97,7 +97,8 @@ impl Node<File> {
     }
 }
 
-pub fn load_dir(root: &Path) -> common::Result<Node<File>> {
+pub fn load_dir<P: AsRef<Path>>(root: &P) -> common::Result<Node<File>> {
+    let root = root.as_ref();
     let metadata = fs::metadata(root)?;
     return Ok(if metadata.is_dir() {
         let mut contents = HashMap::new();

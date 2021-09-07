@@ -33,18 +33,21 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         let mut stop = spawn(&["stop"], &self.root).spawn().unwrap();
 
+        let wait_daemon = self.daemon.wait();
+        let wait_stop = stop.wait();
+
         // if we have already failed, just give up
         if !thread::panicking() {
             // wait on the daemon first so that we see the correct error
-            assert!(self.daemon.wait().unwrap().success());
-            assert!(stop.wait().unwrap().success());
+            assert!(wait_daemon.unwrap().success());
+            assert!(wait_stop.unwrap().success());
         }
     }
 }
 
 fn spawn_daemon<P: AsRef<Path>>(
     id: &str,
-    root: P,
+    root: &P,
     connect: Option<&Daemon>,
 ) -> common::Result<Daemon> {
     let mut args = Vec::new();
@@ -74,8 +77,8 @@ fn spawn_daemon<P: AsRef<Path>>(
     }
 
     let line = lines.next().unwrap().unwrap();
-    let address = RE.captures(&line).unwrap().get(1).unwrap().as_str();
     echo_line(&line, &id);
+    let address = RE.captures(&line).unwrap().get(1).unwrap().as_str();
 
     {
         let id = id.to_string();
@@ -94,10 +97,14 @@ fn spawn_daemon<P: AsRef<Path>>(
     });
 }
 
-pub fn daemon<P: AsRef<Path>>(id: &str, root: P) -> common::Result<Daemon> {
-    return spawn_daemon(id, root, None);
+pub fn daemon<P: AsRef<Path>>(id: &str, root: &P) -> common::Result<Daemon> {
+    return Ok(spawn_daemon(id, root, None)?);
 }
 
-pub fn connect<P: AsRef<Path>>(id: &str, root: P, peer: &Daemon) -> common::Result<Daemon> {
-    return spawn_daemon(id, root, Some(peer));
+pub fn connect<P: AsRef<Path>>(id: &str, root: &P, peer: &Daemon) -> common::Result<Daemon> {
+    return Ok(spawn_daemon(id, root, Some(peer))?);
+}
+
+pub fn tempdir() -> common::Result<TempDir> {
+    return Ok(TempDir::new("collab_test")?);
 }

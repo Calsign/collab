@@ -3,27 +3,58 @@ use std::thread::sleep;
 use std::time::Duration;
 use tempdir::TempDir;
 
-use test_common::{dir, file, file_node, rig};
+use test_common::{common::Result, dir, file, files, rig};
 
 #[test]
-fn basic() {
-    let root1 = TempDir::new("collab_test").unwrap();
-    let root2 = TempDir::new("collab_test").unwrap();
+fn existing_files() -> Result<()> {
+    let root1 = rig::tempdir()?;
+    let root2 = rig::tempdir()?;
 
     let files = dir! {
         "foobar" => file!("x"),
-        "empty_dir" => dir! {}
+        "empty_dir" => dir! {},
+        "another_dir" => dir! {
+            "file" => file!("more text\nand another line")
+        }
     };
 
-    files.apply(root1.path()).unwrap();
+    files.apply(&root1)?;
 
-    let daemon1 = rig::daemon("r1", &root1).unwrap();
-    let daemon2 = rig::connect("r2", &root2, &daemon1).unwrap();
+    let daemon1 = rig::daemon("r1", &root1)?;
+    let daemon2 = rig::connect("r2", &root2, &daemon1)?;
 
     sleep(Duration::from_millis(100));
 
-    assert_eq!(
-        file_node::load_dir(root1.path()).unwrap(),
-        file_node::load_dir(root2.path()).unwrap(),
-    );
+    assert_eq!(files::load_dir(&root1)?, files::load_dir(&root2)?);
+    assert_eq!(files, files::load_dir(&root1)?);
+    assert_eq!(files, files::load_dir(&root2)?);
+
+    return Ok(());
+}
+
+#[test]
+fn added_files() -> Result<()> {
+    let root1 = rig::tempdir()?;
+    let root2 = rig::tempdir()?;
+
+    let daemon1 = rig::daemon("r1", &root1)?;
+    let daemon2 = rig::connect("r2", &root2, &daemon1)?;
+
+    let files = dir! {
+        "foobar" => file!("x"),
+        "empty_dir" => dir! {},
+        "another_dir" => dir! {
+            "file" => file!("more text\nand another line")
+        }
+    };
+
+    files.apply(&root1)?;
+
+    sleep(Duration::from_millis(100));
+
+    assert_eq!(files::load_dir(&root1)?, files::load_dir(&root2)?);
+    assert_eq!(files, files::load_dir(&root1)?);
+    assert_eq!(files, files::load_dir(&root2)?);
+
+    return Ok(());
 }
