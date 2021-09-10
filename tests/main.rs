@@ -1,7 +1,5 @@
-use assert_cmd::Command;
 use std::thread::sleep;
 use std::time::Duration;
-use tempdir::TempDir;
 
 use test_common::{common::Result, dir, file, files, rig};
 
@@ -21,7 +19,7 @@ fn existing_files() -> Result<()> {
     files.apply(&root1)?;
 
     let daemon1 = rig::daemon("r1", &root1)?;
-    let daemon2 = rig::connect("r2", &root2, &daemon1)?;
+    let _daemon2 = rig::connect("r2", &root2, &daemon1)?;
 
     sleep(Duration::from_millis(100));
 
@@ -38,7 +36,7 @@ fn added_files() -> Result<()> {
     let root2 = rig::tempdir()?;
 
     let daemon1 = rig::daemon("r1", &root1)?;
-    let daemon2 = rig::connect("r2", &root2, &daemon1)?;
+    let _daemon2 = rig::connect("r2", &root2, &daemon1)?;
 
     let files = dir! {
         "foobar" => file!("x"),

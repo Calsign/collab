@@ -7,13 +7,13 @@ use crate::common;
 
 // TODO: add support for symlinks?
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Node<T> {
     Dir(HashMap<String, Node<T>>),
     File(T),
 }
 
-#[derive(Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct File {
     pub data: String,
 }
@@ -47,7 +47,7 @@ macro_rules! file(
     }
 );
 
-#[derive(Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum PathNode {
     Dir(RelativePathBuf),
     File(RelativePathBuf, String),
@@ -90,7 +90,7 @@ impl Node<File> {
         }
     }
 
-    pub fn files(&self) -> common::Result<HashSet<PathNode>> {
+    pub fn to_files(&self) -> common::Result<HashSet<PathNode>> {
         let mut set = HashSet::new();
         self.add_files(RelativePath::new(""), &mut set)?;
         return Ok(set);

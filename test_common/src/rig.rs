@@ -1,4 +1,3 @@
-use assert_cmd;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::ffi::OsStr;
@@ -6,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
+use std::time::Duration;
 use tempdir::TempDir;
 
 use crate::common;
@@ -69,16 +69,22 @@ fn spawn_daemon<P: AsRef<Path>>(
         // extract IP address and port, e.g. 127.0.0.1:12345
         // TODO: perhaps there is a better way to do this?
         static ref RE: Regex =
-            Regex::new(r".* ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]:[0-9]+)").unwrap();
+            Regex::new(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]:[0-9]+").unwrap();
     }
 
     fn echo_line(line: &str, id: &str) {
         println!("DAEMON {}: {}", id, line);
     }
 
-    let line = lines.next().unwrap().unwrap();
-    echo_line(&line, &id);
-    let address = RE.captures(&line).unwrap().get(1).unwrap().as_str();
+    let address = loop {
+        // wait until the address gets printed
+        let line = lines.next().unwrap().unwrap();
+        echo_line(&line, &id);
+        match RE.captures(&line).map(|m| m.get(0)) {
+            Some(Some(add)) => break add.as_str().to_string(),
+            _ => continue,
+        }
+    };
 
     {
         let id = id.to_string();
@@ -93,7 +99,7 @@ fn spawn_daemon<P: AsRef<Path>>(
         id: id.to_string(),
         daemon,
         root: root.as_ref().to_path_buf(),
-        address: address.to_string(),
+        address,
     });
 }
 
@@ -108,3 +114,20 @@ pub fn connect<P: AsRef<Path>>(id: &str, root: &P, peer: &Daemon) -> common::Res
 pub fn tempdir() -> common::Result<TempDir> {
     return Ok(TempDir::new("collab_test")?);
 }
+
+pub fn wait() {
+    thread::sleep(Duration::from_millis(200));
+}
+
+#[macro_export]
+macro_rules! path(
+    { $($segment:expr),+ } => {
+        {
+            let mut base = ::std::path::PathBuf::new();
+            $(
+                base.push($segment);
+            )*
+            base
+        }
+    }
+);
