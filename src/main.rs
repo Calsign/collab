@@ -9,7 +9,7 @@ mod tcp;
 use crate::common::*;
 use std::{
     collections::HashMap,
-    net,
+    fs, net,
     path::PathBuf,
     process,
     sync::mpsc,
@@ -85,6 +85,10 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
         })
         .expect("Failed to set sigint handler");
     }
+
+    // set up root dir
+    fs::create_dir_all(&root)?;
+    FsDiff::NewDir(RelativePathBuf::from("")).register(&mut state.register.lock().unwrap())?;
 
     let (msg_sender, msg_receiver) = mpsc::channel();
 

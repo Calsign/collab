@@ -116,7 +116,7 @@ pub fn tempdir() -> common::Result<TempDir> {
 }
 
 pub fn wait() {
-    thread::sleep(Duration::from_millis(300));
+    thread::sleep(Duration::from_millis(200));
 }
 
 #[macro_export]
