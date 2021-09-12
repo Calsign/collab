@@ -10,6 +10,7 @@ use std::{
 
 impl FsDiff {
     /// Apply this FsDiff to the local filesystem
+    #[context("unable to apply fs diff: {:?}, root: {}", self, root.display())]
     pub fn apply(&self, root: &Path) -> Result<()> {
         use FsDiff::*;
         match self {
@@ -33,6 +34,7 @@ impl FsDiff {
     }
 
     /// Register this FsDiff to the file registry
+    #[context("unable to register fs diff: {:?}", self)]
     pub fn register(&self, reg: &mut Reg) -> Result<()> {
         use FsDiff::*;
         use FsReg::*;
@@ -51,7 +53,7 @@ impl FsDiff {
             }
             Del(path) => match reg.remove(path) {
                 Some(_) => Ok(()),
-                None => Err(Error::Error("Register missing path".to_string())),
+                None => Err(CollabError::Error("Register missing path".to_string()).into()),
             },
             Move(from, to) => match reg.remove(from) {
                 Some(file) => {
@@ -64,7 +66,10 @@ impl FsDiff {
                 let data = match reg.get(path) {
                     Some(FsReg::File(data, _)) => data.clone(),
                     _ => {
-                        return Err(Error::Error("".to_string()));
+                        return Err(CollabError::Error(
+                            format!("Unable to apply chmod to path {}", path).to_string(),
+                        )
+                        .into());
                     }
                 };
                 reg.insert(path.clone(), File(data, Some(perm.clone())));
@@ -106,6 +111,7 @@ impl FsDiff {
     }
 }
 
+#[context("unable to load fs, root: {}", root.display())]
 pub fn load_fs(root: &Path, state: &SharedState) -> Result<Vec<FsDiff>> {
     let mut list = Vec::new();
     for entry in collabignore::build_walker(root) {
@@ -142,6 +148,9 @@ pub fn load_fs_and_send_parallel(
                 send.send(Msg {
                     body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                     source: MsgSource::Inotify,
+                })
+                .map_err(|err| {
+                    CollabError::Error(format!("Error sending registered fs diff: {}", err))
                 })?;
             }
         } else {
@@ -149,13 +158,15 @@ pub fn load_fs_and_send_parallel(
                 send.send(Msg {
                     body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                     source: MsgSource::Inotify,
-                })?;
+                })
+                .map_err(|err| CollabError::Error(format!("Error sending fs diff: {}", err)))?;
             }
         }
         return Ok(());
     });
 }
 
+#[context("unable to watch fs, root: {}", root.display())]
 pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Result<()> {
     use notify::{watcher, DebouncedEvent::*, RecursiveMode, Watcher};
 
@@ -260,7 +271,8 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
             send.send(Msg {
                 body: MsgBody::Remote(RemoteMsg::FsDiff(diff)),
                 source: MsgSource::Inotify,
-            })?;
+            })
+            .map_err(|err| CollabError::Error(format!("Error sending watched fs diff: {}", err)))?;
         }
     }
 }

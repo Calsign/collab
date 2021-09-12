@@ -25,6 +25,7 @@ impl Ignore {
         };
     }
 
+    #[context("unable to rebuild ignore")]
     fn rebuild(&mut self) -> Result<()> {
         let mut builder = GitignoreBuilder::new(&self.root);
         for f in &self.files {
@@ -35,12 +36,14 @@ impl Ignore {
         return Ok(());
     }
 
+    #[context("unable to report ignore file modified")]
     pub fn ignore_file_modified(&mut self, file: &Path) -> Result<()> {
         // this is also called if the file changes, so we always have to rebuild
         self.files.insert(PathBuf::from(file));
         return self.rebuild();
     }
 
+    #[context("unable to report ignore file removed")]
     pub fn ignore_file_removed(&mut self, file: &Path) -> Result<()> {
         if self.files.contains(file) {
             self.files.remove(file);

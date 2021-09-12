@@ -10,47 +10,17 @@ use std::{
 
 pub use relative_path::{RelativePath, RelativePathBuf};
 
+pub use anyhow::{Context, Error, Result};
+pub use context_attribute::context;
+
 use crate::collabignore;
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("IO error")]
-    IoError(#[from] io::Error),
-    #[error("Strip prefix error")]
-    StripPrefixError(#[from] std::path::StripPrefixError),
-    #[error("Address parsing error")]
-    AddrParseError(#[from] net::AddrParseError),
-    #[error("Notify error")]
-    NotifyError(#[from] notify::Error),
-    #[error("JSON error")]
-    JsonError(#[from] serde_json::Error),
-    #[error("CSV error")]
-    CsvError(#[from] csv::Error),
-    #[error("CSV intoinner error")]
-    CsvIntoInnerError(#[from] csv::IntoInnerError<csv::Writer<Vec<u8>>>),
-    #[error("Receive error")]
-    RecvError(#[from] mpsc::RecvError),
-    #[error("Send error (message)")]
-    MsgSendError(#[from] mpsc::SendError<Msg>),
-    #[error("Send error (message body)")]
-    MsgBodySendError(#[from] mpsc::SendError<MsgBody>),
-    #[error("Send error (remote message)")]
-    RemoteMsgSendError(#[from] mpsc::SendError<RemoteMsg>),
-    #[error("Send error (ipc client message)")]
-    IpcClientMsgSendError(#[from] mpsc::SendError<IpcClientMsg>),
-    #[error("Send error (ipc client response)")]
-    IpcClientResponseSendError(#[from] mpsc::SendError<IpcClientResponse>),
-    #[error("Gitignore error")]
-    GitignoreError(#[from] ignore::Error),
-    #[error("UTF-8 parsing error")]
-    Utf8Error(#[from] std::str::Utf8Error),
-    #[error("Relative path error")]
-    RelativePathError(#[from] relative_path::FromPathError),
+pub enum CollabError {
     #[error("Error: {0}")]
     Error(String),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
 pub type Reg = HashMap<RelativePathBuf, FsReg>;
 pub type Peers = HashMap<net::SocketAddr, Peer>;
 
@@ -121,6 +91,7 @@ pub struct FilePerm {
 }
 
 impl FilePerm {
+    #[context("unable to get file permissions: {}", path.display())]
     pub fn get(path: &Path) -> Result<Self> {
         let perms = fs::metadata(&path)?.permissions();
         return Ok(Self {
@@ -136,6 +107,7 @@ impl FilePerm {
         });
     }
 
+    #[context("unable to set file permissions: {}", path.display())]
     pub fn set(&self, path: &Path) -> Result<()> {
         let mut perms = fs::metadata(&path)?.permissions();
         perms.set_readonly(self.readonly);

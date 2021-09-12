@@ -17,6 +17,8 @@ use std::{
     thread,
 };
 
+#[context("unable to send startup, source: {}, advertised: {}, root: {}",
+          source_addr, advertised_addr, root.display())]
 fn send_startup(
     source_addr: net::SocketAddr,
     advertised_addr: net::SocketAddr,
@@ -54,6 +56,7 @@ fn send_startup(
     return Ok(());
 }
 
+#[context("unable to start server, connect: {:?}", connect)]
 fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     let state = SharedState {
         register: Arc::new(Mutex::new(HashMap::new())),
@@ -63,9 +66,10 @@ fn server(root: PathBuf, connect: Option<net::SocketAddr>) -> Result<()> {
     };
 
     if ipc::has_active_session(&root)? {
-        return Err(Error::Error(
+        return Err(CollabError::Error(
             "A session is already started in this directory!".to_string(),
-        ));
+        )
+        .into());
     }
 
     {

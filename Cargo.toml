@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 thiserror = "1"
+anyhow = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1.0"
 clap = "2"
@@ -17,6 +18,7 @@ ignore = "0.4"
 csv = "1"
 relative-path = { version = "1", features = ["serde"]  }
 libc = "0.2"
+context_attribute = { path = "context_attribute" }
 
 [dev-dependencies]
 test_common = { path = "test_common" }

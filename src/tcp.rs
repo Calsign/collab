@@ -3,6 +3,7 @@ use std::{io, net, sync::mpsc, thread};
 
 const TCP_DELIM: u8 = b'\0';
 
+#[context("unable to disconnect peer: {}", addr)]
 fn disconnect_peer(state: &SharedState, addr: &net::SocketAddr) -> Result<()> {
     let peer_opt = state.peers.lock().unwrap().remove(&addr);
     match peer_opt {
@@ -12,6 +13,7 @@ fn disconnect_peer(state: &SharedState, addr: &net::SocketAddr) -> Result<()> {
     return Ok(());
 }
 
+#[context("unable to start tcp handler")]
 fn tcp_handler(
     stream: net::TcpStream,
     sender: mpsc::Sender<Msg>,
@@ -51,10 +53,14 @@ fn tcp_handler(
             }
             Ok(size) => {
                 let body = serde_json::from_slice(&data[..size - 1])?;
-                sender.send(Msg {
-                    body: MsgBody::Remote(body),
-                    source: MsgSource::Peer(addr),
-                })?;
+                sender
+                    .send(Msg {
+                        body: MsgBody::Remote(body),
+                        source: MsgSource::Peer(addr),
+                    })
+                    .map_err(|err| {
+                        CollabError::Error(format!("Error sending received tcp message: {}", err))
+                    })?;
             }
             Err(err) => {
                 eprintln!("Peer disconnected: {}, error: {}", addr, err);
@@ -64,6 +70,7 @@ fn tcp_handler(
     }
 }
 
+#[context("unable to add tcp handler")]
 fn add_tcp_handler(
     state: &SharedState,
     stream: net::TcpStream,
@@ -85,6 +92,7 @@ fn add_tcp_handler(
     return Ok(());
 }
 
+#[context("unable to add peer: {}", addr)]
 pub fn add_peer(
     addr: &net::SocketAddr,
     state: &SharedState,
@@ -107,6 +115,7 @@ pub fn add_peer(
     return Ok(());
 }
 
+#[context("unable to start tcp listener")]
 pub fn tcp_listener(
     state: &SharedState,
     diff_sender: &mpsc::Sender<Msg>,

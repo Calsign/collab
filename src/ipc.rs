@@ -33,6 +33,7 @@ fn get_temp_dir() -> PathBuf {
 }
 
 /// Gets the key for a particular directory.
+#[context("unable to get temp key: {}", path.display())]
 fn get_key(path: &Path) -> Result<TmpKey> {
     match path.as_os_str().to_str() {
         Some(path) => {
@@ -40,12 +41,13 @@ fn get_key(path: &Path) -> Result<TmpKey> {
             buf.push(path.replace("/", "!"));
             return Ok(TmpKey { path: buf });
         }
-        None => return Err(Error::Error("Path must be unicode".to_string())),
+        None => return Err(CollabError::Error(format!("Path not unicode: {:?}", path)).into()),
     }
 }
 
 /// Checks to make sure the process associated with the given pid is still alive.
 /// If it is alive, returns true; if it is dead, deletes the key file and returns false.
+#[context("unable to verify key: {}", key.path.display())]
 fn verify_key(key: &TmpKey) -> Result<bool> {
     let data = load_data(key)?;
     if cfg!(target_family = "unix") {
@@ -67,6 +69,7 @@ fn verify_key(key: &TmpKey) -> Result<bool> {
 
 /// Traverses upward in the directory structure until a directory
 /// with an active key is found.
+#[context("unable to find key: {}", path.display())]
 fn find_key(path: &Path) -> Result<Option<TmpKey>> {
     for ancestor in path.ancestors() {
         let key = get_key(&ancestor)?;
@@ -81,6 +84,7 @@ pub fn has_active_session(path: &Path) -> Result<bool> {
     return Ok(find_key(path)?.is_some());
 }
 
+#[context("unable to get active sessions")]
 pub fn get_active_sessions() -> Result<Vec<PathBuf>> {
     let mut list = Vec::new();
     let temp_dir = get_temp_dir();
@@ -107,6 +111,7 @@ pub fn get_active_sessions() -> Result<Vec<PathBuf>> {
 }
 
 /// Used by the client.
+#[context("unable to load temp key data: {}", key.path.display())]
 fn load_data(key: &TmpKey) -> Result<TmpData> {
     if !key.exists() {
         panic!("key does not exist: {:?}", key);
@@ -118,6 +123,7 @@ fn load_data(key: &TmpKey) -> Result<TmpData> {
 }
 
 /// Used by the daemon.
+#[context("unable to write temp key data: {}", key.path.display())]
 fn write_data(key: &TmpKey, data: TmpData) -> Result<()> {
     let buf = serde_json::to_vec(&data)?;
     fs::create_dir_all(get_temp_dir())?;
@@ -125,11 +131,13 @@ fn write_data(key: &TmpKey, data: TmpData) -> Result<()> {
     return Ok(());
 }
 
+#[context("unable to remove temp key data: {}", key.path.display())]
 fn remove_data(key: &TmpKey) -> Result<()> {
     fs::remove_file(&key.path)?;
     return Ok(());
 }
 
+#[context("unable to start ipc daemon thread")]
 fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()> {
     use io::{BufRead, Write};
 
@@ -159,28 +167,43 @@ fn daemon_thread(stream: net::TcpStream, sender: mpsc::Sender<Msg>) -> Result<()
         match reader.read_until(TCP_DELIM, &mut data) {
             Ok(0) => {
                 response_sender.send(IpcClientResponse::LocalDisconnect)?;
-                sender.send(Msg {
-                    body: MsgBody::IpcClient(IpcClientMsg::LocalDisconnect),
-                    source: MsgSource::IpcClient(response_sender.clone(), addr),
-                })?;
+                sender
+                    .send(Msg {
+                        body: MsgBody::IpcClient(IpcClientMsg::LocalDisconnect),
+                        source: MsgSource::IpcClient(response_sender.clone(), addr),
+                    })
+                    .map_err(|err| {
+                        CollabError::Error(format!(
+                            "Error sending received IPC client disconnect: {}",
+                            err
+                        ))
+                    })?;
                 return Ok(());
             }
             Ok(size) => {
                 let msg = serde_json::from_slice(&data[..size - 1])?;
-                sender.send(Msg {
-                    body: MsgBody::IpcClient(msg),
-                    source: MsgSource::IpcClient(response_sender.clone(), addr),
-                })?;
+                sender
+                    .send(Msg {
+                        body: MsgBody::IpcClient(msg),
+                        source: MsgSource::IpcClient(response_sender.clone(), addr),
+                    })
+                    .map_err(|err| {
+                        CollabError::Error(format!(
+                            "Error sending received IPC client message: {}",
+                            err
+                        ))
+                    })?;
             }
             Err(err) => {
                 eprintln!("ipc error: {}", err);
                 response_sender.send(IpcClientResponse::LocalDisconnect)?;
-                return Err(Error::IoError(err));
+                return Err(err.into());
             }
         }
     }
 }
 
+#[context("unable to start ipc daemon: {}", root.display())]
 pub fn daemon(root: &Path, sender: mpsc::Sender<Msg>) -> Result<()> {
     use std::convert::TryFrom;
 
@@ -211,11 +234,13 @@ pub fn daemon(root: &Path, sender: mpsc::Sender<Msg>) -> Result<()> {
     }
 }
 
+#[context("unable to clean up ipc daemon: {}", root.display())]
 pub fn daemon_cleanup(root: &Path) -> Result<()> {
     let key = get_key(&root)?;
     return remove_data(&key);
 }
 
+#[context("unable to start ipc client: {}", root.display())]
 pub fn client(
     root: &Path,
 ) -> Result<(
@@ -227,7 +252,7 @@ pub fn client(
 
     let key = match find_key(root)? {
         Some(key) => key,
-        None => return Err(Error::Error("No session in this directory".to_string())),
+        None => return Err(CollabError::Error("No session in this directory".to_string()).into()),
     };
 
     let data = load_data(&key)?;
@@ -265,7 +290,7 @@ pub fn client(
                 Err(err) => {
                     eprintln!("ipc error: {}", err);
                     response_sender.send(IpcClientResponse::RemoteDisconnect)?;
-                    return Err(Error::IoError(err));
+                    return Err(err.into());
                 }
             }
         }
@@ -274,21 +299,23 @@ pub fn client(
     return Ok((request_sender, response_receiver));
 }
 
+#[context("unable to send client stop: {}", root.display())]
 pub fn client_send_stop(root: &Path) -> Result<()> {
     let (request_sender, response_receiver) = client(root)?;
     request_sender.send(IpcClientMsg::ShutdownRequest)?;
     // wait for disconnect to make sure request goes through
     return match response_receiver.recv()? {
         IpcClientResponse::RemoteDisconnect => Ok(()),
-        _ => Err(Error::Error("Daemon sent bad response".to_string())),
+        _ => Err(CollabError::Error("Daemon sent bad response".to_string()).into()),
     };
 }
 
+#[context("unable to set client info: {}", root.display())]
 pub fn client_get_info(root: &Path) -> Result<IpcClientInfo> {
     let (request_sender, response_receiver) = client(root)?;
     request_sender.send(IpcClientMsg::InfoRequest)?;
     return match response_receiver.recv()? {
         IpcClientResponse::Info(info) => Ok(info),
-        _ => Err(Error::Error("Daemon sent bad response".to_string())),
+        _ => Err(CollabError::Error("Daemon sent bad response".to_string()).into()),
     };
 }

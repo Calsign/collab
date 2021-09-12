@@ -20,6 +20,7 @@ pub struct Cli {
     pub command: CliCommand,
 }
 
+#[context("unable to parse cli")]
 pub fn parse_cli() -> Result<Cli> {
     use clap::{App, Arg, SubCommand};
 
@@ -92,7 +93,7 @@ pub fn parse_cli() -> Result<Cli> {
 
     if root.exists() {
         if !fs::metadata(&root)?.is_dir() {
-            return Err(Error::Error("Root must be a directory".to_string()));
+            return Err(CollabError::Error("Root must be a directory".to_string()).into());
         }
     } else {
         println!("Creating new directory...");
@@ -104,10 +105,10 @@ pub fn parse_cli() -> Result<Cli> {
             let connect: Option<net::SocketAddr> = match matches.value_of("connect") {
                 Some(str) => {
                     if fs::read_dir(&root)?.next().is_some() {
-                        return Err(Error::Error(
+                        return Err(CollabError::Error(
                             "Root directory must be non-empty when connecting to an existing collab"
                                 .to_string(),
-                        ));
+                        ).into());
                     }
                     Some(str.parse()?)
                 }
