@@ -1,8 +1,7 @@
+(provide 'collab)
+
 (require 'subr-x)
 (require 'json)
-
-;; debugging
-(setq debug-on-error t)
 
 (unless (boundp 'collab-command-name)
   (setq collab-command-name "collab"))
