@@ -1,11 +1,13 @@
 use crate::common::*;
 use crate::ipc;
+use context_attribute::context;
 use std::{
     io::{self, BufRead},
     path::Path,
     str, thread,
 };
 
+#[context("unable to parse csv: {}", csv)]
 fn parse_csv(csv: &str) -> Result<BufferDiff> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
@@ -16,6 +18,7 @@ fn parse_csv(csv: &str) -> Result<BufferDiff> {
     return Ok(diff);
 }
 
+#[context("unable to unparse csv: {:?}", diff)]
 fn unparse_csv(diff: &BufferDiff) -> Result<String> {
     let mut writer = csv::WriterBuilder::new()
         .has_headers(false)
@@ -29,6 +32,12 @@ fn unparse_csv(diff: &BufferDiff) -> Result<String> {
     return Ok(String::from(csv));
 }
 
+#[context(
+    "unable to attach, root: {:?}, file: {:?}, mode: {:?}",
+    root,
+    file,
+    mode
+)]
 pub fn attach(root: &Path, file: &Path, desc: String, mode: AttachMode) -> Result<()> {
     let (sender, receiver) = ipc::client(&root)?;
 
@@ -62,7 +71,8 @@ pub fn attach(root: &Path, file: &Path, desc: String, mode: AttachMode) -> Resul
                 return Ok(());
             }
             let data = match mode {
-                AttachMode::Json => serde_json::from_str(&line[..])?,
+                AttachMode::Json => serde_json::from_str(&line[..])
+                    .with_context(|| format!("unable to parse json: {}", &line[..]))?,
                 AttachMode::Csv => parse_csv(&line[..])?,
             };
             sender.send(IpcClientMsg::BufferDiff(data))?;
