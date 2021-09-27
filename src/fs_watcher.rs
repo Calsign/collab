@@ -122,10 +122,15 @@ pub fn load_fs(root: &Path, state: &SharedState) -> Result<Vec<FsDiff>> {
             list.push(FsDiff::NewDir(stripped_path));
         } else {
             let data = fs::read(&path).unwrap_or(Vec::new());
-            list.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
-            list.push(FsDiff::Chmod(stripped_path, FilePerm::get(path)?));
-            if collabignore::is_ignore_file(path) {
-                state.ignore.lock().unwrap().ignore_file_modified(path)?;
+            match FilePerm::get(path) {
+                Ok(perms) => {
+                    list.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
+                    list.push(FsDiff::Chmod(stripped_path, perms));
+                    if collabignore::is_ignore_file(path) {
+                        state.ignore.lock().unwrap().ignore_file_modified(path)?;
+                    }
+                }
+                Err(_) => (), // file may have been deleted or moved
             }
         }
     }
@@ -203,8 +208,13 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
                 if !ignore.is_ignored(&path) {
                     let data = fs::read(&path).unwrap_or(Vec::new());
                     let relative_path = strip_prefix(&path, &root)?;
-                    diffs.push(FsDiff::Write(relative_path.clone(), Arc::new(data)));
-                    diffs.push(FsDiff::Chmod(relative_path, FilePerm::get(&path)?));
+                    match FilePerm::get(&path) {
+                        Ok(perms) => {
+                            diffs.push(FsDiff::Write(relative_path.clone(), Arc::new(data)));
+                            diffs.push(FsDiff::Chmod(relative_path, perms));
+                        }
+                        Err(_) => (), // file may have been deleted or moved
+                    }
                 }
             }
             Remove(path) => {
@@ -248,17 +258,22 @@ pub fn watch_fs(root: &Path, state: &SharedState, send: mpsc::Sender<Msg>) -> Re
                     // looks file is being created
                     let data = fs::read(&to).unwrap_or(Vec::new());
                     let stripped_path = strip_prefix(&to, &root)?;
-                    diffs.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
-                    diffs.push(FsDiff::Chmod(stripped_path, FilePerm::get(&to)?));
+                    match FilePerm::get(&to) {
+                        Ok(perms) => {
+                            diffs.push(FsDiff::Write(stripped_path.clone(), Arc::new(data)));
+                            diffs.push(FsDiff::Chmod(stripped_path, perms));
+                        }
+                        Err(_) => (), // file may have been deleted or moved
+                    }
                 }
             }
             Chmod(path) => {
                 let ignore = state.ignore.lock().unwrap();
                 if !ignore.is_ignored(&path) {
-                    diffs.push(FsDiff::Chmod(
-                        strip_prefix(&path, &root)?,
-                        FilePerm::get(&path)?,
-                    ));
+                    match FilePerm::get(&path) {
+                        Ok(perms) => diffs.push(FsDiff::Chmod(strip_prefix(&path, &root)?, perms)),
+                        Err(_) => (), // file may have been deleted or moved
+                    }
                 }
             }
             _ => (),
