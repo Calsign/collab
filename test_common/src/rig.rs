@@ -161,11 +161,11 @@ pub struct BufferDiff {
 }
 
 impl BufferDiff {
-    pub fn new(pos: u32, old_len: u32, new_str: &str) -> Self {
+    pub fn new<S: Into<String>>(pos: u32, old_len: u32, new_str: S) -> Self {
         return Self {
             pos,
             old_len,
-            new_str: new_str.to_string(),
+            new_str: new_str.into(),
         };
     }
 }
