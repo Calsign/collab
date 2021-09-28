@@ -2,7 +2,7 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     fs, hash,
     hash::{Hash, Hasher},
-    io, net,
+    net,
     path::{Path, PathBuf},
     sync::mpsc,
     sync::{Arc, Mutex},

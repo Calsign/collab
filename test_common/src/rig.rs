@@ -2,13 +2,11 @@ use colored::*;
 use lazy_static::lazy_static;
 use regex::Regex;
 use relative_path::{RelativePath, RelativePathBuf};
-use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use tempdir::TempDir;
@@ -136,8 +134,8 @@ pub struct Attach<'a> {
     daemon: &'a Daemon,
     path: RelativePathBuf,
     process: process::Child,
-    stdout: Arc<Mutex<VecDeque<String>>>,
-    stderr: Arc<Mutex<VecDeque<String>>>,
+    stdout: mpsc::Receiver<String>,
+    stderr: mpsc::Receiver<String>,
 }
 
 impl<'a> Drop for Attach<'a> {
@@ -180,19 +178,13 @@ impl<'a> Attach<'a> {
     }
 
     pub fn pop_stdout(&mut self) -> Option<String> {
-        return self.stdout.lock().unwrap().pop_front();
+        // TODO: using recv_timeout could make tests faster
+        return self.stdout.try_recv().ok();
     }
 
     pub fn pop_stderr(&mut self) -> Option<String> {
-        return self.stderr.lock().unwrap().pop_front();
-    }
-
-    pub fn peek_stdout(&mut self) -> Option<String> {
-        return self.stdout.lock().unwrap().front().map(String::clone);
-    }
-
-    pub fn peek_stderr(&mut self) -> Option<String> {
-        return self.stderr.lock().unwrap().front().map(String::clone);
+        // TODO: using recv_timeout could make tests faster
+        return self.stderr.try_recv().ok();
     }
 
     pub fn send_diff(&mut self, diff: &BufferDiff) -> common::Result<()> {
@@ -224,8 +216,8 @@ pub fn attach<'a, P: AsRef<RelativePath>>(
     let stdout = BufReader::new(process.stdout.take().unwrap()).lines();
     let stderr = BufReader::new(process.stderr.take().unwrap()).lines();
 
-    let stdout_deque = Arc::new(Mutex::new(VecDeque::new()));
-    let stderr_deque = Arc::new(Mutex::new(VecDeque::new()));
+    let (stdout_send, stdout_recv) = mpsc::channel();
+    let (stderr_send, stderr_recv) = mpsc::channel();
 
     fn echo_line(line: &str, id: &str, path: &RelativePath, err: bool) {
         if err {
@@ -236,31 +228,23 @@ pub fn attach<'a, P: AsRef<RelativePath>>(
     }
 
     {
-        let (id, path, stdout_deque) = (
-            daemon.id.clone(),
-            path_ref.to_relative_path_buf(),
-            stdout_deque.clone(),
-        );
+        let (id, path) = (daemon.id.clone(), path_ref.to_relative_path_buf());
         thread::spawn(move || {
             for line in stdout {
                 let line = line.unwrap();
                 echo_line(&line, &id, &path, false);
-                stdout_deque.lock().unwrap().push_back(line);
+                stdout_send.send(line).unwrap();
             }
         });
     }
 
     {
-        let (id, path, stderr_deque) = (
-            daemon.id.clone(),
-            path_ref.to_relative_path_buf(),
-            stderr_deque.clone(),
-        );
+        let (id, path) = (daemon.id.clone(), path_ref.to_relative_path_buf());
         thread::spawn(move || {
             for line in stderr {
                 let line = line.unwrap();
                 echo_line(&line, &id, &path, true);
-                stderr_deque.lock().unwrap().push_back(line);
+                stderr_send.send(line).unwrap();
             }
         });
     }
@@ -269,8 +253,8 @@ pub fn attach<'a, P: AsRef<RelativePath>>(
         daemon: &daemon,
         path: path_ref.to_relative_path_buf(),
         process: process,
-        stdout: stdout_deque,
-        stderr: stderr_deque,
+        stdout: stdout_recv,
+        stderr: stderr_recv,
     });
 }
 
