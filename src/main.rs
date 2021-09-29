@@ -263,13 +263,3 @@ fn main() -> Result<()> {
     let Cli { root, command } = cli::parse_cli()?;
     return handle_command(root, command);
 }
-
-// current problems:
-//  - don't load entire file into memory, send it by streaming instead?
-//  - possibly place a hard limit on size of tracked files? (1 MB?)
-//  - interface for sending/receiving diffs
-//  - connect without having to delete existing files in directory
-//  - operational transformation
-//  - editor integration
-//  - encryption with libsignal-protocol?
-//  - maybe other things? I forget
